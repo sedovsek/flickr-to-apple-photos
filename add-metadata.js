@@ -5,6 +5,7 @@ const path = require('path');
 const DATA_DIR = path.join(__dirname, 'data');
 const IMAGES_DIR = path.join(__dirname, 'images');
 const OUTPUT_DIR = path.join(__dirname, 'flickr');
+
 function checkExifTool() {
   try {
     execSync('which exiftool', { stdio: 'ignore' });
