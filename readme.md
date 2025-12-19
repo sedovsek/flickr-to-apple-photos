@@ -2,6 +2,8 @@
 
 Embed Flickr metadata (titles, descriptions, tags, albums, GPS) into photos to be imported into Apple's Photos.
 
+**Note**: Flickr Pro account is needed to download your data.
+
 ## Step 1: Request your data from Flickr
 
 Go to your Flickr account ([flickr.com/account](https://www.flickr.com/account)) and click on the "Request my Flickr data".
