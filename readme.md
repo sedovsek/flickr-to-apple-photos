@@ -18,8 +18,8 @@ You'll get several zip files: one with your account and photos info (metadata), 
 
 Create two folders: **data** and **images**.
 
-- Unzip account data into **data/** folder (contains JSON files with metadata, e.g. `albums.json`, `photo_{id}.json`, etc.)
-- Unzip photo files (`data-download-1.zip`, etc.) into **images/** folder (photos named `{title}_{id}_o.jpg`)
+- Unzip account data into `data/` folder (contains JSON files with metadata, e.g. `albums.json`, `photo_{id}.json`, etc.)
+- Unzip photo files (`data-download-1.zip`, etc.) into `images/` folder (photos named `{title}_{id}_o.jpg`)
 
 ## Step 3: Prerequisites
 
@@ -32,6 +32,6 @@ Run `node add-metadata.js` to embed metadata into images. Enhanced images will b
 
 ## Step 5: Import to Apple Photos
 
-Open Apple Photos → "File" → "Import" → select your **flickr/** folder. Enable "Keep folders" to create albums from folder structure.
+Open Apple Photos → "File" → "Import" → select your `flickr/` folder. Enable "Keep folders" to create albums from folder structure.
 
 **Note**: Albums will appear nested (e.g., `flickr/Portraits/Portraits`). You can drag albums to reorganize them.
