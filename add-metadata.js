@@ -2,12 +2,9 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-// Configuration
 const DATA_DIR = path.join(__dirname, 'data');
 const IMAGES_DIR = path.join(__dirname, 'images');
-const OUTPUT_DIR = path.join(__dirname, 'images-with-metadata');
-
-// Utility Functions
+const OUTPUT_DIR = path.join(__dirname, 'flickr');
 function checkExifTool() {
   try {
     execSync('which exiftool', { stdio: 'ignore' });
@@ -22,6 +19,21 @@ function ensureOutputDir() {
     fs.mkdirSync(OUTPUT_DIR, { recursive: true });
     console.log(`📁 Created output directory: ${OUTPUT_DIR}`);
   }
+}
+
+function sanitizeFolderName(name) {
+  return name
+    .replace(/[<>:"/\\|?*]/g, '_') // Replace invalid characters
+    .replace(/\s+/g, ' ')          // Normalize whitespace
+    .trim();
+}
+
+function ensureAlbumDir(albumName) {
+  const albumDir = path.join(OUTPUT_DIR, sanitizeFolderName(albumName));
+  if (!fs.existsSync(albumDir)) {
+    fs.mkdirSync(albumDir, { recursive: true });
+  }
+  return albumDir;
 }
 
 function getImageMetadata(imagePath) {
@@ -40,7 +52,6 @@ function findImageFile(photoId) {
   return match ? path.join(IMAGES_DIR, match) : null;
 }
 
-// Data Transformation Functions
 function convertGeoCoordinate(coord) {
   if (!coord) return null;
   return parseInt(coord, 10) / 1000000;
@@ -76,7 +87,13 @@ function isCameraMetadata(description) {
   return cameraBrands.some(brand => desc.includes(brand)) || desc.length < 5;
 }
 
-// Metadata Building Functions
+function getExistingKeywords(existingMeta) {
+  return (existingMeta?.Keywords || existingMeta?.Subject || '')
+    .split(',')
+    .map(k => k.trim())
+    .filter(Boolean);
+}
+
 function buildExifToolCommand(destPath, jsonData, existingMeta) {
   const commands = [];
   let changesCount = 0;
@@ -117,14 +134,13 @@ function buildExifToolCommand(destPath, jsonData, existingMeta) {
     const lon = convertGeoCoordinate(jsonData.geo[0].longitude);
     if (lat && lon && !existingMeta?.GPSLatitude) {
       commands.push(`-GPSLatitude=${lat}`, `-GPSLongitude=${lon}`);
-      // Remove GPSAltitudeRef - it's not related to accuracy
       changesCount++;
     }
   }
 
   // Keywords/Tags (merge with existing)
   if (jsonData.tags?.length > 0) {
-    const existingKeywords = (existingMeta?.Keywords || existingMeta?.Subject || '').split(',').map(k => k.trim()).filter(Boolean);
+    const existingKeywords = getExistingKeywords(existingMeta);
     const newKeywords = jsonData.tags.map(t => t.tag);
     const missingKeywords = newKeywords.filter(k => 
       !existingKeywords.some(ek => ek.toLowerCase() === k.toLowerCase())
@@ -144,7 +160,7 @@ function buildExifToolCommand(destPath, jsonData, existingMeta) {
     changesCount++;
 
     // Add albums as keywords
-    const existingKeywords = (existingMeta?.Keywords || existingMeta?.Subject || '').split(',').map(k => k.trim()).filter(Boolean);
+    const existingKeywords = getExistingKeywords(existingMeta);
     const albumTitles = jsonData.albums.map(a => a.title);
     const missingAlbums = albumTitles.filter(a => 
       !existingKeywords.some(ek => ek.toLowerCase() === a.toLowerCase())
@@ -172,7 +188,6 @@ function buildExifToolCommand(destPath, jsonData, existingMeta) {
   };
 }
 
-// Main Processing Function
 function processPhoto(jsonPath, stats) {
   try {
     const jsonData = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
@@ -190,35 +205,49 @@ function processPhoto(jsonPath, stats) {
     }
 
     const sourceFilename = path.basename(sourceImagePath);
-    const destImagePath = path.join(OUTPUT_DIR, sourceFilename);
+    
+    const albumFolders = jsonData.albums?.length > 0
+      ? jsonData.albums.filter(a => a.title).map(a => ensureAlbumDir(a.title))
+      : [ensureAlbumDir('Uncategorized')];
 
-    // Copy source image to destination
-    fs.copyFileSync(sourceImagePath, destImagePath);
+    let processedAny = false;
+    let totalChanges = 0;
+    let failedCount = 0;
 
-    const existingMeta = getImageMetadata(destImagePath);
-    const { command, changesCount } = buildExifToolCommand(destImagePath, jsonData, existingMeta);
+    albumFolders.forEach(albumDir => {
+      const destImagePath = path.join(albumDir, sourceFilename);
 
-    if (!command) {
-      stats.skipped++;
-      return;
-    }
+      try {
+        fs.copyFileSync(sourceImagePath, destImagePath);
+        const existingMeta = getImageMetadata(destImagePath);
+        const { command, changesCount } = buildExifToolCommand(destImagePath, jsonData, existingMeta);
 
-    try {
-      execSync(command, { stdio: 'pipe' });
-      stats.processed++;
-      stats.totalChanges += changesCount;
-    } catch (error) {
-      stats.errors++;
-      if (fs.existsSync(destImagePath)) {
-        fs.unlinkSync(destImagePath);
+        if (command) {
+          execSync(command, { stdio: 'pipe' });
+          totalChanges += changesCount;
+        }
+        processedAny = true;
+      } catch (error) {
+        if (fs.existsSync(destImagePath)) {
+          fs.unlinkSync(destImagePath);
+        }
+        failedCount++;
       }
+    });
+
+    if (processedAny) {
+      stats.processed++;
+      stats.totalChanges += totalChanges;
+    } else if (failedCount === albumFolders.length) {
+      stats.errors++;
+    } else {
+      stats.skipped++;
     }
   } catch (error) {
     stats.errors++;
   }
 }
 
-// Main Execution
 console.log('🚀 Starting Flickr Metadata Embedding\n');
 console.log('='.repeat(60));
 
@@ -237,7 +266,8 @@ const jsonFiles = fs.readdirSync(DATA_DIR)
 
 console.log(`📁 Found ${jsonFiles.length} photo JSON files`);
 console.log(`📁 Source images: ${IMAGES_DIR}`);
-console.log(`📁 Output directory: ${OUTPUT_DIR}\n`);
+console.log(`📁 Output directory: ${OUTPUT_DIR}`);
+console.log(`📁 Files will be organized by album: ${OUTPUT_DIR}/{album name}/\n`);
 
 const stats = {
   processed: 0,
@@ -270,3 +300,5 @@ console.log(`   Total metadata fields added/updated: ${stats.totalChanges}`);
 console.log(`   Total: ${jsonFiles.length}`);
 console.log(`   Time elapsed: ${elapsed}s`);
 console.log(`\n📁 Enhanced images saved to: ${OUTPUT_DIR}`);
+console.log(`   Images are organized by album folders (photos without albums go to "Uncategorized")`);
+console.log(`   Ready for Apple Photos import with "Keep folders" option!`);
